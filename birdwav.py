@@ -2,24 +2,27 @@ import cv2
 import numpy as np
 from pydub import AudioSegment
 from pydub.generators import Sine
+from pydub.effects import low_pass_filter
 
 def extract_bird_coordinates(video_path):
     cap = cv2.VideoCapture(video_path)
     backSub = cv2.createBackgroundSubtractorMOG2(detectShadows=True)
     bird_coordinates = []
-    
+    frame_count = 0
+
     while True:
         ret, frame = cap.read()
         if not ret:
             break
         
+        frame_count += 1
         fgMask = backSub.apply(frame)
         _, thresh = cv2.threshold(fgMask, 244, 255, cv2.THRESH_BINARY)
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
         frame_coordinates = []
         for contour in contours:
-            if cv2.contourArea(contour) > 100:  # Adjust this threshold as needed
+            if cv2.contourArea(contour) > 100:
                 M = cv2.moments(contour)
                 if M["m00"] != 0:
                     cX = int(M["m10"] / M["m00"])
@@ -29,17 +32,18 @@ def extract_bird_coordinates(video_path):
         bird_coordinates.append(frame_coordinates)
     
     cap.release()
+    print(f"Processed {frame_count} frames")
     return bird_coordinates
 
 def coordinates_to_frequency(x, y, width, height):
-    min_freq, max_freq = 220, 880
+    min_freq, max_freq = 150, 450
     freq = min_freq + (x / width) * (max_freq - min_freq)
     return freq
 
 def generate_audio(coordinates, width, height, fps=30):
     audio = AudioSegment.silent(duration=0)
-    frame_duration = 1000 // fps  # Duration of each frame in milliseconds
-    crossfade_duration = min(frame_duration // 2, 50)  # Crossfade between frames, max 50ms
+    frame_duration = 1000 // fps
+    crossfade_duration = min(frame_duration // 2, 50)
     
     for frame_num, frame_coords in enumerate(coordinates):
         frame_audio = AudioSegment.silent(duration=frame_duration)
@@ -47,22 +51,16 @@ def generate_audio(coordinates, width, height, fps=30):
         
         for x, y in frame_coords:
             freq = coordinates_to_frequency(x, y, width, height)
-            print(f"  Bird at ({x}, {y}): freq={freq:.2f}Hz")
             tone = Sine(freq).to_audio_segment(duration=frame_duration)
-            # Apply low-pass filter for a softer sound
             tone = low_pass_filter(tone, 1000)
-            # Fade in and out for smoother transitions
             tone = tone.fade_in(crossfade_duration).fade_out(crossfade_duration)
             frame_audio = frame_audio.overlay(tone, gain_during_overlay=-6)
         
-        if len(audio) > 0:
-            audio = audio.append(frame_audio, crossfade=crossfade_duration)
-        else:
-            audio += frame_audio
+        audio += frame_audio
         
-        print(f"  Total audio duration: {len(audio)}ms")
+        if frame_num % 30 == 0:  # Print every second
+            print(f"  Total audio duration: {len(audio)}ms")
     
-    # Add a gentle background ambience
     bg_noise = AudioSegment.silent(duration=len(audio)).overlay(
         Sine(80).to_audio_segment(duration=len(audio)), gain_during_overlay=-20
     )
@@ -80,9 +78,11 @@ def main(video_path, output_path):
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = int(cap.get(cv2.CAP_PROP_FPS))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    duration = total_frames / fps
     cap.release()
     
-    print(f"Video dimensions: {width}x{height}, FPS: {fps}")
+    print(f"Video properties: {width}x{height}, {fps} FPS, {total_frames} frames, {duration:.2f} seconds")
     
     print("Generating audio...")
     audio = generate_audio(coordinates, width, height, fps)
