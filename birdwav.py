@@ -33,22 +33,25 @@ def extract_bird_coordinates(video_path):
 
 def coordinates_to_frequency(x, y, width, height):
     min_freq, max_freq = 220, 880
-    min_duration, max_duration = 50, 200
     freq = min_freq + (x / width) * (max_freq - min_freq)
-    duration = min_duration + (y / height) * (max_duration - min_duration)
-    return freq, duration
+    return freq
 
-def generate_audio(coordinates, width, height):
+def generate_audio(coordinates, width, height, fps=30):
     audio = AudioSegment.silent(duration=0)
+    frame_duration = 1000 // fps  # Duration of each frame in milliseconds
+    
     for frame_num, frame_coords in enumerate(coordinates):
-        frame_audio = AudioSegment.silent(duration=0)
+        frame_audio = AudioSegment.silent(duration=frame_duration)
         print(f"Processing frame {frame_num+1}/{len(coordinates)}, {len(frame_coords)} birds detected")
+        
         for x, y in frame_coords:
-            freq, duration = coordinates_to_frequency(x, y, width, height)
-            print(f"  Bird at ({x}, {y}): freq={freq:.2f}Hz, duration={duration:.2f}ms")
-            tone = Sine(freq).to_audio_segment(duration=duration)
+            freq = coordinates_to_frequency(x, y, width, height)
+            print(f"  Bird at ({x}, {y}): freq={freq:.2f}Hz")
+            tone = Sine(freq).to_audio_segment(duration=frame_duration)
             frame_audio = frame_audio.overlay(tone)
+        
         audio += frame_audio
+        print(f"  Frame audio duration: {len(frame_audio)}ms, Total audio duration: {len(audio)}ms")
     
     print(f"Final audio duration: {len(audio)}ms")
     return audio
@@ -61,12 +64,13 @@ def main(video_path, output_path):
     cap = cv2.VideoCapture(video_path)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps = int(cap.get(cv2.CAP_PROP_FPS))
     cap.release()
     
-    print(f"Video dimensions: {width}x{height}")
+    print(f"Video dimensions: {width}x{height}, FPS: {fps}")
     
     print("Generating audio...")
-    audio = generate_audio(coordinates, width, height)
+    audio = generate_audio(coordinates, width, height, fps)
     
     print(f"Exporting audio to {output_path}")
     audio.export(output_path, format="wav")
