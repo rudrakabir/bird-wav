@@ -39,6 +39,7 @@ def coordinates_to_frequency(x, y, width, height):
 def generate_audio(coordinates, width, height, fps=30):
     audio = AudioSegment.silent(duration=0)
     frame_duration = 1000 // fps  # Duration of each frame in milliseconds
+    crossfade_duration = min(frame_duration // 2, 50)  # Crossfade between frames, max 50ms
     
     for frame_num, frame_coords in enumerate(coordinates):
         frame_audio = AudioSegment.silent(duration=frame_duration)
@@ -48,10 +49,24 @@ def generate_audio(coordinates, width, height, fps=30):
             freq = coordinates_to_frequency(x, y, width, height)
             print(f"  Bird at ({x}, {y}): freq={freq:.2f}Hz")
             tone = Sine(freq).to_audio_segment(duration=frame_duration)
-            frame_audio = frame_audio.overlay(tone)
+            # Apply low-pass filter for a softer sound
+            tone = low_pass_filter(tone, 1000)
+            # Fade in and out for smoother transitions
+            tone = tone.fade_in(crossfade_duration).fade_out(crossfade_duration)
+            frame_audio = frame_audio.overlay(tone, gain_during_overlay=-6)
         
-        audio += frame_audio
-        print(f"  Frame audio duration: {len(frame_audio)}ms, Total audio duration: {len(audio)}ms")
+        if len(audio) > 0:
+            audio = audio.append(frame_audio, crossfade=crossfade_duration)
+        else:
+            audio += frame_audio
+        
+        print(f"  Total audio duration: {len(audio)}ms")
+    
+    # Add a gentle background ambience
+    bg_noise = AudioSegment.silent(duration=len(audio)).overlay(
+        Sine(80).to_audio_segment(duration=len(audio)), gain_during_overlay=-20
+    )
+    audio = audio.overlay(bg_noise)
     
     print(f"Final audio duration: {len(audio)}ms")
     return audio
